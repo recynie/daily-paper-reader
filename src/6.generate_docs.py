@@ -1589,13 +1589,17 @@ def update_sidebar(
     paper_evidence_by_id: Dict[str, str],
     date_label: str | None = None,
 ) -> None:
-    def build_sidebar_view_data(
+    def build_sidebar_item_payload(
+        paper_id: str,
+        title: str,
         tags: List[Tuple[str, str]],
-    ) -> Tuple[str, List[Dict[str, str]]]:
+        route_href: str,
+        evidence: str = "",
+    ) -> str:
         score_text = "-"
         clean_tags: List[Dict[str, str]] = []
         for kind, label in (tags or []):
-            safe_kind = (kind or "other").strip().lower() or "other"
+            safe_kind = (kind or "other").strip() or "other"
             safe_label = (label or "").strip()
             if not safe_label:
                 continue
@@ -1605,56 +1609,7 @@ def update_sidebar(
                 except Exception:
                     score_text = safe_label
                 continue
-            if safe_kind == "keyword":
-                safe_kind = "query"
             clean_tags.append({"kind": safe_kind, "label": safe_label})
-        return score_text, clean_tags
-
-    def build_sidebar_item_markup(
-        title: str,
-        tags: List[Tuple[str, str]],
-        evidence: str = "",
-    ) -> str:
-        score_text, clean_tags = build_sidebar_view_data(tags)
-        score_span = (
-            f'<span class="dpr-sidebar-tag dpr-sidebar-tag-score">{build_sidebar_stars_html(score_text)}</span>'
-            if score_text not in ("", "-")
-            else '<span class="dpr-sidebar-score-empty">-</span>'
-        )
-        tags_span = []
-        for item in clean_tags:
-            kind = (str(item.get("kind") or "other")).strip().lower()
-            if kind not in {"keyword", "query", "paper", "other"}:
-                kind = "other"
-            if kind == "keyword":
-                kind = "query"
-            label = html.escape(str(item.get("label") or "").strip())
-            if not label:
-                continue
-            tags_span.append(
-                f'<span class="dpr-sidebar-tag dpr-sidebar-tag-{kind}">{label}</span>'
-            )
-        tags_html = (
-            "".join(tags_span)
-            if tags_span
-            else '<span class="dpr-sidebar-tag dpr-sidebar-tag-other">-</span>'
-        )
-        evidence_text = html.escape(str(evidence or "").strip() or "-")
-        return (
-            f'<div class="dpr-sidebar-title">{html.escape((title or "").strip() or "未知标题")}</div>'
-            f'<div class="dpr-sidebar-link-line">{evidence_text}</div>'
-            f'<div class="dpr-sidebar-meta-line">{score_span}'
-            f'<span class="dpr-sidebar-meta-tags">{tags_html}</span></div>'
-        )
-
-    def build_sidebar_item_payload(
-        paper_id: str,
-        title: str,
-        tags: List[Tuple[str, str]],
-        route_href: str,
-        evidence: str = "",
-    ) -> str:
-        score_text, clean_tags = build_sidebar_view_data(tags)
 
         arxiv_id = str(paper_id or "").strip().split("/")[-1]
         paper_link = f"https://arxiv.org/abs/{arxiv_id}" if arxiv_id else route_href
@@ -1717,24 +1672,24 @@ def update_sidebar(
     if deep_entries:
         block.append("    * 精读区\n")
         for paper_id, title, tags in deep_entries:
+            safe_title = html.escape((title or "").strip() or paper_id)
             href = f"#/{paper_id}"
             evidence = paper_evidence_by_id.get(str(paper_id).strip(), "")
             payload_json = build_sidebar_item_payload(paper_id, title, tags, href, evidence)
             block.append(
                 "      * "
-                f'<a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="{href}" data-sidebar-item="{payload_json}">'
-                f'{build_sidebar_item_markup(title, tags, evidence)}</a>\n'
+                f'<a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="{href}" data-sidebar-item="{payload_json}">{safe_title}</a>\n'
             )
     if quick_entries:
         block.append("    * 速读区\n")
         for paper_id, title, tags in quick_entries:
+            safe_title = html.escape((title or "").strip() or paper_id)
             href = f"#/{paper_id}"
             evidence = paper_evidence_by_id.get(str(paper_id).strip(), "")
             payload_json = build_sidebar_item_payload(paper_id, title, tags, href, evidence)
             block.append(
                 "      * "
-                f'<a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="{href}" data-sidebar-item="{payload_json}">'
-                f'{build_sidebar_item_markup(title, tags, evidence)}</a>\n'
+                f'<a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="{href}" data-sidebar-item="{payload_json}">{safe_title}</a>\n'
             )
 
     insert_idx = daily_idx + 1
