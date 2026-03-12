@@ -631,6 +631,34 @@ window.SubscriptionsSmartQuery = (function () {
   };
 
   const requestCandidatesByDesc = async (tag, desc) => {
+    if (
+      window.DPRCodingPlanAdapter
+      && typeof window.DPRCodingPlanAdapter.listProviderConfigsFromSecret === 'function'
+      && typeof window.DPRCodingPlanAdapter.requestCodingPlan === 'function'
+    ) {
+      const secret = window.decoded_secret_private || {};
+      const providers = window.DPRCodingPlanAdapter.listProviderConfigsFromSecret(secret);
+      if (providers.length > 0) {
+        const template = defaultPromptTemplate;
+        const prompt = buildPromptFromTemplate(tag, desc, template);
+        const result = await window.DPRCodingPlanAdapter.requestCodingPlan({
+          providerConfig: providers[0],
+          prompt,
+          systemPrompt:
+            'You are a retrieval planning assistant and can only return valid JSON. '
+            + 'The response must be fully based on the current user input and must not reference prior conversation history.',
+          timeoutMs: 120000,
+          temperature: 0.1,
+        });
+        const parsed = loadJsonLenient(result && result.content ? result.content : '');
+        const candidates = normalizeGenerated(parsed);
+        if (!candidates.keywords.length) {
+          throw new Error('模型未返回可用候选，请调整描述后重试。');
+        }
+        return candidates;
+      }
+    }
+
     const llm = loadLlmConfig();
     if (!llm) {
       throw new Error('未检测到可用大模型配置，请先完成密钥配置。');
