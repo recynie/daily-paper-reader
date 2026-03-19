@@ -96,11 +96,20 @@
 
 ### 1) 🔑 准备大模型 API Key
 
-当前 README 默认以 **柏拉图 API 平台** 为示例，建议先按默认配置跑通。
+当前支持两种接口形态：
 
-- 🌐 打开 [柏拉图 API 平台](https://api.bltcy.ai/)
-- 📝 完成注册 / 登录
-- 🔐 充值并创建密钥
+- **柏拉图 API 平台（默认示例）**
+  - 🌐 打开 [柏拉图 API 平台](https://api.bltcy.ai/)
+  - 📝 完成注册 / 登录
+  - 🔐 充值并创建密钥
+- **OpenAI 兼容接口**
+  - 准备 `API Key`
+  - 准备兼容 `Chat Completions` 的 `Base URL`
+  - 准备要使用的模型名，例如 `gpt-4o-mini`、`gpt-5-chat` 或你网关里可用的模型
+
+> [!NOTE]
+> 如果你选择 OpenAI 兼容接口，Daily Paper Reader 会正常使用该接口完成总结、问答和 LLM refine。
+> 第 3 步的专用 `/rerank` 能力目前仍是 BLT 专属；未配置 BLT 时会自动回退到基于召回结果的排序，不会阻塞整条流水线。
 
 ### 2) 🪪 准备 GitHub PAT
 

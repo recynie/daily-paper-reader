@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# 使用柏拉图 Rerank API 对候选论文做重排序（简化版）。
+# 使用 BLT Rerank API 对候选论文做重排序；若未配置 BLT，则回退为召回分数排序。
 
 import argparse
 import json
@@ -237,8 +237,59 @@ def rrf_merge(scores: Dict[int, float], rank_idx: int, orig_idx: int) -> None:
   scores[orig_idx] = scores.get(orig_idx, 0.0) + 1.0 / (RRF_K + rank_idx)
 
 
+def build_fallback_ranked_results(
+  query_obj: Dict[str, Any],
+  candidate_ids: List[str],
+  top_n: Optional[int],
+) -> List[Dict[str, Any]]:
+  sim_scores = query_obj.get("sim_scores") or {}
+  ranked_candidates: List[Tuple[str, int, float, int]] = []
+  missing_rank = 10 ** 9
+
+  for candidate_idx, pid in enumerate(candidate_ids):
+    meta = sim_scores.get(pid) if isinstance(sim_scores, dict) else None
+    rank = missing_rank
+    score = 0.0
+    if isinstance(meta, dict):
+      raw_rank = meta.get("rank")
+      raw_score = meta.get("score")
+      if isinstance(raw_rank, (int, float)):
+        rank = int(raw_rank)
+      if isinstance(raw_score, (int, float)):
+        score = float(raw_score)
+    ranked_candidates.append((pid, rank, score, candidate_idx))
+
+  ranked_candidates.sort(
+    key=lambda item: (
+      item[1] >= missing_rank,
+      item[1],
+      -item[2],
+      item[3],
+    )
+  )
+  ordered_ids = [pid for pid, _rank, _score, _idx in ranked_candidates]
+  if top_n is not None:
+    ordered_ids = ordered_ids[:top_n]
+
+  total = len(ordered_ids)
+  if total <= 0:
+    return []
+
+  ranked: List[Dict[str, Any]] = []
+  for pos, paper_id in enumerate(ordered_ids, start=1):
+    score = 1.0 if total == 1 else max(0.0, 1.0 - ((pos - 1) / (total - 1)))
+    ranked.append(
+      {
+        "paper_id": paper_id,
+        "score": score,
+        "star_rating": score_to_stars(score),
+      }
+    )
+  return ranked
+
+
 def process_file(
-  reranker: BltClient,
+  reranker: Optional[BltClient],
   input_path: str,
   output_path: str,
   top_n: Optional[int],
@@ -296,6 +347,22 @@ def process_file(
     f"batch_size={BATCH_SIZE}，"
     f"max_chars={MAX_CHARS_PER_DOC}，token_safety={TOKEN_SAFETY}"
   )
+
+  if reranker is None:
+    log("[WARN] 未配置 BLT_API_KEY，Step 3 将回退为基于召回结果的近似排序。")
+    for q in queries:
+      q_text = (q.get("rewrite") or q.get("query_text") or "").strip()
+      top_ids = list(global_candidate_ids)
+      if not q_text or not top_ids:
+        continue
+      q["ranked"] = build_fallback_ranked_results(q, top_ids, top_n)
+
+    meta_generated_at = data.get("generated_at") or ""
+    data["reranked_at"] = datetime.now(timezone.utc).isoformat()
+    data["generated_at"] = meta_generated_at
+    save_json(data, output_path)
+    group_end()
+    return
 
   for q_idx, q in enumerate(queries, start=1):
     q_text = (q.get("rewrite") or q.get("query_text") or "").strip()
@@ -388,7 +455,7 @@ def process_file(
 
 def main() -> None:
   parser = argparse.ArgumentParser(
-    description="步骤 3：使用 BLT Rerank API 对候选论文做重排序（简化版）。",
+    description="步骤 3：优先使用 BLT Rerank API 重排；未配置时回退为召回排序。",
   )
   parser.add_argument(
     "--input",
@@ -412,7 +479,7 @@ def main() -> None:
     "--rerank-model",
     type=str,
     default=os.getenv("BLT_RERANK_MODEL") or os.getenv("RERANK_MODEL") or "qwen3-reranker-4b",
-    help="BLT Rerank 模型名称（默认 qwen3-reranker-4b）。",
+    help="BLT Rerank 模型名称（默认 qwen3-reranker-4b；仅在配置 BLT 时使用）。",
   )
 
   args = parser.parse_args()
@@ -429,11 +496,8 @@ def main() -> None:
     log(f"[WARN] 输入文件不存在（今天可能没有新论文）：{input_path}，将跳过 Step 3。")
     return
 
-  api_key = os.getenv("BLT_API_KEY")
-  if not api_key:
-    raise RuntimeError("缺少 BLT_API_KEY 环境变量，无法调用 BLT Rerank API。")
-
-  reranker = BltClient(api_key=api_key, model=args.rerank_model)
+  api_key = (os.getenv("BLT_API_KEY") or "").strip()
+  reranker = BltClient(api_key=api_key, model=args.rerank_model) if api_key else None
   process_file(
     reranker=reranker,
     input_path=input_path,

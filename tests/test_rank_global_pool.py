@@ -138,6 +138,60 @@ class RankGlobalPoolTest(unittest.TestCase):
             self.assertEqual(saved.get("global_pool_limit"), 60)
             self.assertEqual(saved.get("global_pool_guaranteed_per_lane"), 8)
 
+    def test_process_file_falls_back_when_blt_reranker_missing(self):
+        payload = {
+            "generated_at": "2026-03-19T00:00:00+00:00",
+            "papers": [
+                {"id": "p1", "title": "Intent paper", "abstract": "intent abstract"},
+                {"id": "p2", "title": "Keyword bridge", "abstract": "keyword abstract"},
+                {"id": "p3", "title": "Intent tail paper", "abstract": "tail abstract"},
+            ],
+            "queries": [
+                {
+                    "type": "keyword",
+                    "tag": "AHD",
+                    "paper_tag": "keyword:AHD",
+                    "query_text": "Automated Algorithm Design",
+                    "sim_scores": {
+                        "p2": {"rank": 1, "score": 1.0},
+                    },
+                },
+                {
+                    "type": "intent_query",
+                    "tag": "AHD",
+                    "paper_tag": "query:AHD",
+                    "query_text": "how to automate the discovery of new optimization algorithms",
+                    "sim_scores": {
+                        "p1": {"rank": 1, "score": 0.9},
+                        "p3": {"rank": 2, "score": 0.8},
+                    },
+                },
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            input_path = pathlib.Path(tmp) / "input.json"
+            output_path = pathlib.Path(tmp) / "output.json"
+            input_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+            self.mod.process_file(
+                reranker=None,
+                input_path=str(input_path),
+                output_path=str(output_path),
+                top_n=None,
+                rerank_model="unused",
+            )
+
+            saved = json.loads(output_path.read_text(encoding="utf-8"))
+            queries = saved.get("queries") or []
+            intent_queries = [q for q in queries if q.get("type") == "intent_query"]
+            self.assertEqual(len(intent_queries), 1)
+            ranked = intent_queries[0].get("ranked") or []
+            ranked_ids = [item.get("paper_id") for item in ranked]
+            self.assertEqual(ranked_ids, ["p1", "p3", "p2"])
+            self.assertEqual(ranked[0].get("star_rating"), 5)
+            self.assertEqual(ranked[-1].get("star_rating"), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,7 +8,7 @@ import requests
 统一的 LLM 客户端封装。
 
 提供商/模型命名规则：'provider/model'，provider 大小写不敏感，model 保留大小写与路径。
-当前支持：deepseek、siliconflow、ollama、blt、cstcloud（科技云）。
+当前支持：openai、deepseek、siliconflow、ollama、blt、cstcloud（科技云）。
 """
 
 # 单次实验级别的全局 token 统计（需由调用方在实验开始前手动 reset）
@@ -23,6 +23,42 @@ GLOBAL_TIME_SECONDS: float = 0.0
 
 PRIMARY_LLM_BASE_URL = "https://api.gptbest.vip/v1"
 DEFAULT_BLT_BASE_URL = "https://api.bltcy.ai/v1"
+DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
+
+
+def _normalize_provider_name(provider: str | None) -> str:
+    return str(provider or "").strip().lower()
+
+
+def _looks_like_blt_base_url(base_url: str | None) -> bool:
+    raw = str(base_url or "").strip().lower()
+    if not raw:
+        return False
+    return "bltcy" in raw or "gptbest" in raw or "/rerank" in raw
+
+
+def _is_supported_provider_name(provider: str | None) -> bool:
+    normalized = _normalize_provider_name(provider)
+    return normalized in {
+        "openai",
+        "oai",
+        "openai-compatible",
+        "openai_compatible",
+        "compatible",
+        "deepseek",
+        "siliconflow",
+        "silicon-flow",
+        "sflow",
+        "ollama",
+        "blt",
+        "bltcy",
+        "plato",
+        "cstcloud",
+        "cst",
+        "cst-cloud",
+        "keji",
+        "keji-yun",
+    }
 
 
 def reset_global_tokens():
@@ -330,6 +366,13 @@ class DeepSeekClient(LLMClient):
         super().__init__(api_key=api_key, model=model, base_url=base_url)
 
 
+class OpenAICompatibleClient(LLMClient):
+    """通用 OpenAI Chat Completions 兼容客户端。"""
+
+    def __init__(self, api_key: str, model: str, base_url: str = DEFAULT_OPENAI_BASE_URL):
+        super().__init__(api_key=api_key, model=model, base_url=base_url)
+
+
 class SiliconflowClient(LLMClient):
     def __init__(self, api_key: str, model: str, base_url: str = "https://api.siliconflow.cn/v1"):
         super().__init__(api_key=api_key, model=model, base_url=base_url)
@@ -474,6 +517,35 @@ def parse_provider_model(model_str: str) -> Tuple[str, str]:
 
 class ClientFactory:
     @staticmethod
+    def from_parts(
+        provider: str,
+        model: str,
+        api_key: str | None = None,
+        base_url: str | None = None,
+    ):
+        provider = _normalize_provider_name(provider)
+        api_key = (api_key or "").strip()
+        base_url = (base_url or "").strip() or None
+
+        if provider in ("openai", "oai", "openai-compatible", "openai_compatible", "compatible"):
+            base_url = base_url or DEFAULT_OPENAI_BASE_URL
+            return OpenAICompatibleClient(api_key=api_key, model=model, base_url=base_url)
+        if provider == 'deepseek':
+            base_url = base_url or "https://api.deepseek.com"
+            return DeepSeekClient(api_key=api_key or os.getenv('DEEPSEEK_API_KEY', ''), model=model, base_url=base_url)
+        if provider in ('siliconflow', 'silicon-flow', 'sflow'):
+            base_url = base_url or "https://api.siliconflow.cn/v1"
+            return SiliconflowClient(api_key=api_key or os.getenv('SILICONFLOW_API_KEY', ''), model=model, base_url=base_url)
+        if provider == 'ollama':
+            base_url = base_url or "http://localhost:11111/v1"
+            return OllamaClient(api_key=api_key or '', model=model, base_url=base_url)
+        if provider in ('blt', 'bltcy', 'plato'):
+            return BltClient(api_key=api_key or os.getenv('BLT_API_KEY', ''), model=model, base_url=base_url or os.getenv('BLT_API_BASE', DEFAULT_BLT_BASE_URL))
+        if provider in ('cstcloud', 'cst', 'cst-cloud', 'keji', 'keji-yun'):
+            return CSTCloudClient(api_key=api_key or os.getenv('CSTCLOUD_API_KEY', ''), model=model, base_url=base_url or 'https://uni-api.cstcloud.cn/v1')
+        raise ValueError(f"不支持的提供商: {provider}，请使用 'openai'、'deepseek'、'siliconflow'、'blt'、'cstcloud' 或 'ollama'")
+
+    @staticmethod
     def from_env():
         """
         基于环境变量创建具体客户端。
@@ -491,21 +563,7 @@ class ClientFactory:
         provider, model = parse_provider_model(model_env)
         api_key = (os.getenv('LLM_API_KEY') or '').strip() or None
         base_url = (os.getenv('LLM_BASE_URL') or '').strip() or None
-
-        if provider == 'deepseek':
-            base_url = base_url or "https://api.deepseek.com"
-            return DeepSeekClient(api_key=api_key or os.getenv('DEEPSEEK_API_KEY', ''), model=model, base_url=base_url)
-        if provider in ('siliconflow', 'silicon-flow', 'sflow'):
-            base_url = base_url or "https://api.siliconflow.cn/v1"
-            return SiliconflowClient(api_key=api_key or os.getenv('SILICONFLOW_API_KEY', ''), model=model, base_url=base_url)
-        if provider == 'ollama':
-            base_url = base_url or "http://localhost:11111/v1"
-            return OllamaClient(api_key=api_key or '', model=model, base_url=base_url)
-        if provider in ('blt', 'bltcy', 'plato'):
-            return BltClient(api_key=api_key or os.getenv('BLT_API_KEY', ''), model=model, base_url=base_url or os.getenv('BLT_API_BASE', 'https://api.bltcy.ai/v1'))
-        if provider in ('cstcloud', 'cst', 'cst-cloud', 'keji', 'keji-yun'):
-            return CSTCloudClient(api_key=api_key or os.getenv('CSTCLOUD_API_KEY', ''), model=model, base_url=base_url or 'https://uni-api.cstcloud.cn/v1')
-        raise ValueError(f"不支持的提供商: {provider}，请使用 'deepseek'、'siliconflow'、'blt'、'cstcloud' 或 'ollama'")
+        return ClientFactory.from_parts(provider, model, api_key=api_key, base_url=base_url)
 
     @staticmethod
     def from_config(_config: dict | None = None):
@@ -513,3 +571,41 @@ class ClientFactory:
         兼容旧调用入口，但不再读取 config 文件，统一从环境变量读取。
         """
         return ClientFactory.from_env()
+
+
+def build_chat_client(
+    api_key: str,
+    model: str,
+    base_url: str | None = None,
+    default_provider: str = "openai",
+) -> LLMClient:
+    """
+    基于宽松输入创建聊天客户端。
+
+    支持两种模型写法：
+    - provider/model：显式指定 provider；
+    - model：结合 default_provider / base_url 推断。
+    """
+    api_key = (api_key or "").strip()
+    if not api_key:
+        raise ValueError("缺少 API Key，无法创建 LLM 客户端。")
+
+    model = (model or "").strip()
+    if not model:
+        raise ValueError("缺少模型名，无法创建 LLM 客户端。")
+
+    base_url = (base_url or "").strip() or None
+    if "/" in model:
+        maybe_provider, maybe_model = model.split("/", 1)
+        if _is_supported_provider_name(maybe_provider) and maybe_model.strip():
+            return ClientFactory.from_parts(
+                maybe_provider,
+                maybe_model.strip(),
+                api_key=api_key,
+                base_url=base_url,
+            )
+
+    provider = _normalize_provider_name(default_provider)
+    if not provider:
+        provider = "blt" if _looks_like_blt_base_url(base_url) else "openai"
+    return ClientFactory.from_parts(provider, model, api_key=api_key, base_url=base_url)

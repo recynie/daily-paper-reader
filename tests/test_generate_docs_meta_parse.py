@@ -18,8 +18,13 @@ class GenerateDocsMetaParseTest(unittest.TestCase):
                 def __init__(self, *args, **kwargs):
                     pass
 
-            llm_stub.BltClient = DummyBltClient
+            llm_stub.LLMClient = DummyBltClient
+            llm_stub.build_chat_client = lambda *args, **kwargs: DummyBltClient()
             sys.modules["llm"] = llm_stub
+        if "fitz" not in sys.modules:
+            import types
+
+            sys.modules["fitz"] = types.ModuleType("fitz")
 
         src_path = root / "src" / "6.generate_docs.py"
         spec = importlib.util.spec_from_file_location("gen6_mod", src_path)

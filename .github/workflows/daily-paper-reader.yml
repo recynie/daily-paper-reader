@@ -30,7 +30,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
+      LLM_API_KEY: ${{ secrets.Summarized_LLM_API_KEY }}
+      LLM_BASE_URL: ${{ secrets.Summarized_LLM_BASE_URL }}
+      SUMMARIZED_LLM_API_KEY: ${{ secrets.Summarized_LLM_API_KEY }}
+      SUMMARIZED_LLM_BASE_URL: ${{ secrets.Summarized_LLM_BASE_URL }}
+      SUMMARIZED_LLM_MODEL: ${{ secrets.Summarized_LLM_MODEL }}
       BLT_API_KEY: ${{ secrets.BLT_API_KEY }}
+      REWRITE_LLM_MODEL: ${{ secrets.Summarized_LLM_MODEL || 'gemini-3-flash-preview' }}
+      FILTER_LLM_MODEL: ${{ secrets.Summarized_LLM_MODEL || 'gemini-3-flash-preview-nothinking' }}
+      SUMMARY_LLM_MODEL: ${{ secrets.Summarized_LLM_MODEL || 'gemini-3-flash-preview' }}
       BLT_REWRITE_MODEL: gemini-3-flash-preview
       BLT_RERANK_MODEL: qwen3-reranker-4b
       BLT_FILTER_MODEL: gemini-3-flash-preview-nothinking

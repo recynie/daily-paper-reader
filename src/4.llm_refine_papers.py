@@ -10,7 +10,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List
 
-from llm import BltClient
+from llm import LLMClient, build_chat_client
 from subscription_plan import build_pipeline_inputs
 
 SCRIPT_DIR = os.path.dirname(__file__)
@@ -20,7 +20,12 @@ ARCHIVE_DIR = os.path.join(ROOT_DIR, "archive", TODAY_STR)
 RANKED_DIR = os.path.join(ARCHIVE_DIR, "rank")
 CONFIG_FILE = os.path.join(ROOT_DIR, "config.yaml")
 
-DEFAULT_FILTER_MODEL = os.getenv("BLT_FILTER_MODEL") or "gemini-3-flash-preview-nothinking"
+DEFAULT_FILTER_MODEL = (
+    os.getenv("FILTER_LLM_MODEL")
+    or os.getenv("SUMMARIZED_LLM_MODEL")
+    or os.getenv("BLT_FILTER_MODEL")
+    or "gemini-3-flash-preview-nothinking"
+)
 DEFAULT_FILTER_CONCURRENCY = 4
 MAX_FILTER_RETRIES = 3
 
@@ -309,7 +314,7 @@ def build_repeated_user_prompt(query: str) -> str:
 
 
 def call_filter(
-    client: BltClient,
+    client: LLMClient,
     all_requirements: List[Dict[str, str]],
     docs: List[Dict[str, str]],
     debug_dir: str,
@@ -688,14 +693,31 @@ def recover_filter_results(
     )
 
 
-def _make_filter_client(api_key: str, model: str, max_output_tokens: int) -> BltClient:
-    client = BltClient(api_key=api_key, model=model)
+def _default_provider(base_url: str | None) -> str:
+    raw = str(base_url or "").strip().lower()
+    if "bltcy" in raw or "gptbest" in raw:
+        return "blt"
+    return "openai"
+
+
+def _make_filter_client(
+    api_key: str,
+    model: str,
+    max_output_tokens: int,
+    base_url: str | None,
+) -> LLMClient:
+    client = build_chat_client(
+        api_key=api_key,
+        model=model,
+        base_url=base_url,
+        default_provider=_default_provider(base_url),
+    )
     client.kwargs.update({"temperature": 0.1, "max_tokens": max_output_tokens})
     return client
 
 
 def _make_filter_runner(
-    client: BltClient,
+    client: LLMClient,
     all_requirements: List[Dict[str, str]],
     debug_dir: str,
     base_tag: str,
@@ -767,12 +789,13 @@ def _filter_batch(
     batch_idx: int,
     batch: List[Dict[str, str]],
     api_key: str,
+    base_url: str | None,
     all_requirements: List[Dict[str, str]],
     filter_model: str,
     max_output_tokens: int,
     debug_dir: str,
 ) -> tuple[int, List[Dict[str, str]], List[Dict[str, Any]]]:
-    client = _make_filter_client(api_key, filter_model, max_output_tokens)
+    client = _make_filter_client(api_key, filter_model, max_output_tokens, base_url)
     runner = _make_filter_runner(
         client,
         all_requirements=all_requirements,
@@ -821,9 +844,22 @@ def process_file(
         return
     paper_map = build_paper_map(papers)
 
-    api_key = os.getenv("BLT_API_KEY")
+    api_key = (
+        os.getenv("LLM_API_KEY")
+        or os.getenv("SUMMARIZED_LLM_API_KEY")
+        or os.getenv("BLT_API_KEY")
+        or ""
+    ).strip()
     if not api_key:
-        raise RuntimeError("missing BLT_API_KEY")
+        raise RuntimeError(
+            "missing LLM_API_KEY / SUMMARIZED_LLM_API_KEY (legacy BLT_API_KEY is still accepted)"
+        )
+    base_url = (
+        os.getenv("LLM_BASE_URL")
+        or os.getenv("SUMMARIZED_LLM_BASE_URL")
+        or os.getenv("BLT_API_BASE")
+        or ""
+    ).strip() or None
 
     group_start(f"Step 4 - llm refine {os.path.basename(input_path)}")
     log(
@@ -882,16 +918,19 @@ def process_file(
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         for idx, batch in enumerate(batches, start=1):
             log(f"[INFO] filter batch {idx}/{total_batches} dispatch docs={len(batch)}")
-            pending[executor.submit(
-                _filter_batch,
-                idx,
-                batch,
-                api_key,
-                user_requirements,
-                filter_model,
-                max_output_tokens,
-                debug_dir,
-            )] = (idx, batch)
+            pending[
+                executor.submit(
+                    _filter_batch,
+                    idx,
+                    batch,
+                    api_key,
+                    base_url,
+                    user_requirements,
+                    filter_model,
+                    max_output_tokens,
+                    debug_dir,
+                )
+            ] = (idx, batch)
         for future in as_completed(pending):
             idx, batch = pending[future]
             try:
@@ -912,7 +951,7 @@ def process_file(
             if _norm_text(doc.get("id"))
         }
         recovery_docs = list(recovery_map.values())
-        recovery_client = _make_filter_client(api_key, filter_model, max_output_tokens)
+        recovery_client = _make_filter_client(api_key, filter_model, max_output_tokens, base_url)
         log(
             f"[WARN] start missing-doc recovery: failed_batches_docs={len(failed_docs)} "
             f"| missing_after_merge={len(missing_docs)} | recover_docs={len(recovery_docs)}"

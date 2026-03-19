@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # 自动补全 config.yaml 中的 related / rewrite 字段：
-# - keywords 缺少 related 时，调用 BLT gpt-4o-mini 生成相关词
-# - llm_queries 缺少 rewrite 时，调用 BLT gpt-4o-mini 生成英文改写
+# - keywords 缺少 related 时，调用 OpenAI 兼容 Chat Completions 生成相关词
+# - llm_queries 缺少 rewrite 时，调用 OpenAI 兼容 Chat Completions 生成英文改写
 
 import os
 import json
@@ -10,12 +10,17 @@ from typing import Any, Dict, List
 
 import yaml  # type: ignore
 
-from llm import BltClient
+from llm import LLMClient, build_chat_client
 
 SCRIPT_DIR = os.path.dirname(__file__)
 CONFIG_FILE = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "config.yaml"))
 
-MODEL_NAME = os.getenv("BLT_REWRITE_MODEL", "gemini-3-flash-preview")
+MODEL_NAME = (
+  os.getenv("REWRITE_LLM_MODEL")
+  or os.getenv("SUMMARIZED_LLM_MODEL")
+  or os.getenv("BLT_REWRITE_MODEL")
+  or "gemini-3-flash-preview"
+)
 
 def log(message: str) -> None:
   ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
@@ -106,7 +111,42 @@ def build_rewrite_prompt(query: str) -> List[Dict[str, str]]:
   ]
 
 
-def call_llm_json(client: BltClient, messages: List[Dict[str, str]], schema_name: str, schema: Dict[str, Any]) -> Dict[str, Any]:
+def _default_provider(base_url: str | None) -> str:
+  raw = str(base_url or "").strip().lower()
+  if "bltcy" in raw or "gptbest" in raw:
+    return "blt"
+  return "openai"
+
+
+def build_enrich_client() -> LLMClient:
+  api_key = (
+    os.getenv("LLM_API_KEY")
+    or os.getenv("SUMMARIZED_LLM_API_KEY")
+    or os.getenv("BLT_API_KEY")
+    or ""
+  ).strip()
+  if not api_key:
+    raise RuntimeError(
+      "缺少可用 API Key。请配置 LLM_API_KEY 或 Summarized_LLM_API_KEY（兼容旧的 BLT_API_KEY）。"
+    )
+
+  base_url = (
+    os.getenv("LLM_BASE_URL")
+    or os.getenv("SUMMARIZED_LLM_BASE_URL")
+    or os.getenv("BLT_API_BASE")
+    or ""
+  ).strip() or None
+
+  model = (os.getenv("LLM_MODEL") or MODEL_NAME).strip()
+  return build_chat_client(
+    api_key=api_key,
+    model=model,
+    base_url=base_url,
+    default_provider=_default_provider(base_url),
+  )
+
+
+def call_llm_json(client: LLMClient, messages: List[Dict[str, str]], schema_name: str, schema: Dict[str, Any]) -> Dict[str, Any]:
   response_format = {
     "type": "json_schema",
     "json_schema": {
@@ -136,10 +176,6 @@ def main() -> None:
     if not os.path.exists(CONFIG_FILE):
         raise FileNotFoundError(f"找不到 config.yaml：{CONFIG_FILE}")
 
-    api_key = os.getenv("BLT_API_KEY")
-    if not api_key:
-        raise RuntimeError("缺少 BLT_API_KEY 环境变量，无法调用 BLT。")
-
     group_start("Step 0.0 - load config")
     with open(CONFIG_FILE, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
@@ -149,7 +185,7 @@ def main() -> None:
     keywords = subs.get("keywords") or []
     llm_queries = subs.get("llm_queries") or []
 
-    client = BltClient(api_key=api_key, model=MODEL_NAME)
+    client = build_enrich_client()
 
     related_schema = {
       "type": "object",
