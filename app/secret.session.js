@@ -587,6 +587,7 @@
         <p style="font-size:13px; color:#555; margin-bottom:8px;">
           检测到已存在密钥文件 <code>secret.private</code>。请输入解锁密码，
           或选择以游客身份访问（仅支持阅读论文，无法使用后台大模型能力）。
+          如需切换到 OpenAI 兼容接口，可直接进入重新配置。
         </p>
         <label for="secret-gate-password" style="font-size:13px; color:#333; display:block; margin-bottom:4px;">
           解锁密码（至少 8 位，包含数字、小写字母、大写字母和特殊符号）：
@@ -601,6 +602,9 @@
           密码仅在本地用于解密，不会上传到服务器。
         </div>
         <div class="secret-gate-actions">
+          <button id="secret-gate-reconfigure" type="button" class="secret-gate-btn secondary">
+            重新配置
+          </button>
           <button id="secret-gate-guest" type="button" class="secret-gate-btn secondary">
             以游客身份访问
           </button>
@@ -612,10 +616,20 @@
 
       const pwdInput = document.getElementById('secret-gate-password');
       const errorEl = document.getElementById('secret-gate-error');
+      const reconfigureBtn = document.getElementById('secret-gate-reconfigure');
       const guestBtn = document.getElementById('secret-gate-guest');
       const unlockBtn = document.getElementById('secret-gate-unlock');
 
-      if (!pwdInput || !guestBtn || !unlockBtn) return;
+      if (!pwdInput || !reconfigureBtn || !guestBtn || !unlockBtn) return;
+
+      reconfigureBtn.addEventListener('click', () => {
+        const savedPwd = loadSavedPassword();
+        if (savedPwd) {
+          renderInitStep2(savedPwd);
+          return;
+        }
+        renderInitStep1();
+      });
 
       // 游客模式：不解密，不加载密钥，仅浏览 & 阅读
       guestBtn.addEventListener('click', () => {
@@ -638,6 +652,7 @@
           errorEl.style.color = '#666';
         }
         unlockBtn.disabled = true;
+        reconfigureBtn.disabled = true;
         guestBtn.disabled = true;
         try {
           const resp = await fetch(SECRET_FILE_URL, { cache: 'no-store' });
@@ -660,6 +675,7 @@
           }
         } finally {
           unlockBtn.disabled = false;
+          reconfigureBtn.disabled = false;
           guestBtn.disabled = false;
         }
       });
