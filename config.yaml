@@ -25,45 +25,4 @@ subscriptions:
     stage: A
     diff_threshold_pct: 15
   keyword_recall_mode: or
-  intent_profiles:
-    - tag: agent
-      description: 智能体相关
-      enabled: true
-      keywords:
-        - keyword: context learning
-          keyword_cn: 上下文学习
-          query: f
-        - keyword: continual learning
-          keyword_cn: 持续学习
-          query: a
-        - keyword: self-distillation
-          keyword_cn: 自蒸馏
-          query: m
-        - keyword: agentic memory
-          keyword_cn: 智能体记忆
-          query: a
-        - keyword: self-evolving agent
-          keyword_cn: 自进化智能体
-          query: s
-      intent_queries:
-        - query: multi agent system
-          query_cn: 多智能体系统
-          enabled: true
-          source: manual
-          note: ''
-        - query: agentic memory
-          query_cn: 智能体记忆
-          enabled: true
-          source: manual
-          note: ''
-        - query: ai for science
-          query_cn: ''
-          enabled: true
-          source: manual
-          note: ''
-        - query: self evolving
-          query_cn: 自进化
-          enabled: true
-          source: manual
-          note: ''
-      updated_at: '2026-03-19T05:25:35.852Z'
+  intent_profiles: []
